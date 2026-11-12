@@ -60,7 +60,7 @@ Yes. Nothing in `snakedraft.model` imports anything from `view` or `controller`,
 
 - **Snake reversal with a deque (figured out).** We rebuild the queue at the end of each round: odd rounds enqueue teams 1 to N, even rounds N to 1. This needed only basic queue operations, and `snakeOrderIsABCCBA` tests it directly.
 - **Loading real NFL player data (still open).** The MVP uses a fixed pool of 40 real player names in `PlayerPool`. Reading from a file and handling malformed rows is not built yet.
-- **Trade confirmation and pending trades (still open, deferred).** Trading is a stretch goal and is not started.
+- **Trade confirmation and pending trades (decided, not built).** Trading is our Deliverable 4 change feature. We decided trades are immediate (same keyboard, so no pending state); see Next Steps.
 
 ### What doesn't work yet
 
@@ -78,30 +78,41 @@ Yes. Nothing in `snakedraft.model` imports anything from `view` or `controller`,
 2. Add view tests that check `showBoard`, `showError`, and `showFinalRosters` output. Owner: Shreyas.
 3. Final pass on bad input from the scope doc using the full app, and fix anything found. Owner: Ishaan.
 
-### Change feature: Undo the last pick
+### Change feature: Trade picks between teams
 
-The user types `undo` on any turn and the most recent pick is reversed: the player goes back into the pool, comes off that team's roster, and that team is back on the clock (even if the undo crosses back into the previous round).
+On their turn, a user can type `trade <Team A> <round> <Team B> <round>` (for example `trade Tigers 3 Bears 4`) to swap those two future picks. Trades are immediate: both teams are at the same keyboard, so the user who types the command confirms it. This settles our third unknown, so there is no pending-trade state to store. Only picks in rounds after the current round can be traded, so the queue for the round in progress never changes mid-round.
 
 **Predicted to change:**
 
-- `DraftModel`: new field `Deque<PickRecord> history` (or our own stack) recording team, player, and normalized key for each pick; `makePick` pushes a record; new `Player undoLastPick()` that pops it, puts the player back into `pool`, removes the key from `draftedNames`, decrements `pickNumber`, and rebuilds `turnQueue` for the correct round with a new private `rebuildQueueFor(int round, int picksMadeInRound)`. If the draft was over, `draftOver` goes back to false. Throws `IllegalStateException` if there is nothing to undo.
-- `Team`: new `Player removeLastPlayer()`.
-- `DraftController.handlePick`: recognize the word `undo` before calling `makePick`, call `model.undoLastPick()`, and catch the "nothing to undo" error.
-- `DraftView`: new `showUndo(Team team, Player player)`.
+- `DraftModel`:
+  - New field `List<List<Team>> roundOrders`, built in the constructor with one snake-ordered list per round.
+  - `refillQueue()` changes to enqueue from `roundOrders.get(currentRound - 1)` instead of computing forward or reverse order.
+  - New `void tradePicks(String teamA, int roundA, String teamB, int roundB)` swaps the two slots in `roundOrders`. It throws `IllegalArgumentException` if:
+    - either team name is unknown
+    - a team doesn't own a pick in that round
+    - both picks belong to the same team
+    - a round is not after the current round
+  - It throws `IllegalStateException` if the draft is over.
+  - New private helper `Team findTeam(String name)`.
+  - New read-only `List<Team> getRoundOrder(int round)` so the controller can show upcoming order.
+- `DraftController.handlePick`: checks whether input starts with `trade`, parses the four parts (rejecting a missing part or a non-numeric round), and calls `model.tradePicks`.
+- `DraftView`: new `showTradeResult(String teamA, int roundA, String teamB, int roundB)` and `showRoundOrder(int round, List<Team> order)`.
 
-**Predicted not to change:** `TurnQueue` (we rebuild it instead of adding a remove-from-back method), `Player`, `PlayerPool`, `Main`, and `ModelDriver`.
+**Predicted not to change:** `TurnQueue` (it still just serves whatever order it is filled with), `Team`, `Player`, `PlayerPool`, `Main`, and `ModelDriver`.
 
 ### Stretch goals
 
-- **Committing to:** undo the last pick (our change feature), then position limits (for example max 2 QB, at least 1 K) if time allows.
-- **Dropping:** auto-draft from a wish list, trading picks, ordering by previous-season performance, and loading real data from a file.
+- **Committing to:** trading picks (our change feature), then undo the last pick if time allows.
+- **Dropping:** auto-draft from a wish list, position limits, ordering by previous-season performance, and loading real data from a file.
 
 ### New tests needed
 
-- `undoLastPick`: undo mid-round restores the same team on the clock; undo at the first pick of a round goes back to the previous round and the correct team; undo after the draft is over reopens it; undo with no picks throws `IllegalStateException` and changes nothing; undone player is available again and can be re-drafted.
-- `Team.removeLastPlayer`: normal case and empty-roster case.
-- `DraftController.handlePick("undo")`: returns the right value and shows the right message, including `UNDO` and `  undo  `.
-- If position limits are built: a pick that breaks a limit throws `IllegalArgumentException` with a reason and changes nothing.
+- `tradePicks` normal case: after `trade A 2 B 2` in a 2-team, 3-round draft, round 2 is served B then A, and round 3 is unchanged.
+- Trading a pick in the current or a past round throws `IllegalArgumentException` and changes no order.
+- Unknown team, same team on both sides, and a round outside 1 to totalRounds each throw `IllegalArgumentException`.
+- `tradePicks` after the draft is over throws `IllegalStateException`.
+- `handlePick` parsing: `trade Tigers 3 Bears 4` is accepted. `trade Tigers three Bears 4`, `trade Tigers 3`, and `TRADE  tigers 3 bears 4` (case and spacing) are each rejected or accepted correctly.
+- The full snake order for a whole draft still matches A B C C B A when no trades happen (regression).
 
 ### Who does what
 
@@ -110,10 +121,11 @@ The user types `undo` on any turn and the most recent pick is reversed: the play
 | Board grouped by position | Jack |
 | View tests | Shreyas |
 | Bad-input pass | Ishaan |
-| Undo: `DraftModel` and `Team` changes | Luke |
-| Undo: controller and view changes | Ishaan and Jack |
-| Undo tests | Shreyas |
-| Position limits (if time) | Luke |
+| Trade: `DraftModel` changes (`roundOrders`, `tradePicks`) | Luke |
+| Trade: controller parsing | Ishaan |
+| Trade: view methods | Jack |
+| Trade tests | Shreyas |
+| Undo (if time) | Luke |
 
 ## Attribution
 
@@ -135,4 +147,4 @@ The user types `undo` on any turn and the most recent pick is reversed: the play
 
 ### GenAI note
 
-We used Claude to generate a first version of the code from our Deliverable 2 specification and scope documents, and to draft this README. We gave it our spec (class design, method signatures, validation rules, and test plan) and asked it to follow the signatures closely and point out where it had to deviate. Every deviation is listed in the Reflection table above. We then ran the program, ran all JUnit tests, and reviewed each class. For the change feature, we described our classes to GenAI and asked which ones an undo feature would force us to edit; its list (`DraftModel`, `Team`, `DraftController`, `DraftView`) matched ours and did not require changing `TurnQueue`.
+We used Claude to generate a first version of the code from our Deliverable 2 specification and scope documents, and to draft this README. We gave it our spec (class design, method signatures, validation rules, and test plan) and asked it to follow the signatures closely and point out where it had to deviate. Every deviation is listed in the Reflection table above. We then ran the program, ran all JUnit tests, and reviewed each class. For the change feature, we described our classes to GenAI and asked which ones a trade feature would force us to edit; its list (`DraftModel`, `DraftController`, `DraftView`) matched ours and did not require changing `TurnQueue`.
