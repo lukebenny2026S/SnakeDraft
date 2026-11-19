@@ -104,6 +104,38 @@ public class DraftView {
     }
 
     /**
+     * Prints the result of an accepted trade.
+     *
+     * @param teamA  first team's name
+     * @param roundA round of the pick team A gave up
+     * @param teamB  second team's name
+     * @param roundB round of the pick team B gave up
+     */
+    public void showTradeResult(String teamA, int roundA, String teamB,
+        int roundB) {
+        out.println("  > Trade: " + teamA + " gives its round " + roundA
+            + " pick to " + teamB + " for " + teamB + "'s round " + roundB
+            + " pick.");
+    }
+
+    /**
+     * Prints the planned pick order for one round.
+     *
+     * @param round the round number
+     * @param order the teams in pick order
+     */
+    public void showRoundOrder(int round, List<Team> order) {
+        StringBuilder sb = new StringBuilder();
+        for (Team team : order) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(team.getName());
+        }
+        out.println("    Round " + round + " order: " + sb);
+    }
+
+    /**
      * Prints every team's final roster.
      *
      * @param teams all teams

@@ -77,6 +77,7 @@ public class DraftModelTest {
         assertTrue(model.isAvailable("  player   1 "));
         assertTrue(model.isAvailable("PLAYER1"));
         assertEquals("Player 1", model.makePick("pLaYeR  1").getName());
+        assertTrue(model.isAvailable("player-2."));
     }
 
     @Test
@@ -158,5 +159,148 @@ public class DraftModelTest {
     @Test
     public void defaultPoolHasFortyPlayers() {
         assertEquals(40, PlayerPool.defaultPlayers().size());
+    }
+
+    // ---------- trading picks (Deliverable 4 change feature) ----------
+
+    /** 3 teams, 3 rounds, 9 players: orders A B C / C B A / A B C. */
+    private DraftModel threeRoundModel() {
+        List<Player> nine = new ArrayList<>();
+        for (int i = 1; i <= 9; i++) {
+            nine.add(new Player("Player " + i, "WR"));
+        }
+        return new DraftModel(teams, nine, 3);
+    }
+
+    /** Makes picks until the draft ends and returns who picked, in order. */
+    private List<Team> draftEverything(DraftModel m) {
+        List<Team> served = new ArrayList<>();
+        int next = 1;
+        while (!m.isDraftOver()) {
+            served.add(m.getTeamOnClock());
+            while (!m.isAvailable("Player " + next)) {
+                next++;
+            }
+            m.makePick("Player " + next);
+        }
+        return served;
+    }
+
+    @Test
+    public void roundOrdersStartAsSnake() {
+        DraftModel m = threeRoundModel();
+        assertEquals(Arrays.asList(a, b, c), m.getRoundOrder(1));
+        assertEquals(Arrays.asList(c, b, a), m.getRoundOrder(2));
+        assertEquals(Arrays.asList(a, b, c), m.getRoundOrder(3));
+    }
+
+    @Test
+    public void noTradesKeepsSnakeOrder() {
+        assertEquals(Arrays.asList(a, b, c, c, b, a, a, b, c),
+            draftEverything(threeRoundModel()));
+    }
+
+    @Test
+    public void tradeSwapsPicksAcrossRounds() {
+        DraftModel m = threeRoundModel();
+        m.tradePicks("A", 2, "C", 3);
+        assertEquals(Arrays.asList(c, b, c), m.getRoundOrder(2));
+        assertEquals(Arrays.asList(a, b, a), m.getRoundOrder(3));
+        assertEquals(Arrays.asList(a, b, c, c, b, c, a, b, a),
+            draftEverything(m));
+        // A gave up round 2 but owns two round 3 picks; C the reverse.
+        assertEquals(3, a.getRoster().size());
+        assertEquals(3, c.getRoster().size());
+    }
+
+    @Test
+    public void tradeInSameRoundSwapsOrder() {
+        DraftModel m = threeRoundModel();
+        m.tradePicks("a", 2, "  C ", 2);
+        assertEquals(Arrays.asList(a, b, c), m.getRoundOrder(2));
+        assertEquals(Arrays.asList(a, b, c), m.getRoundOrder(3));
+    }
+
+    @Test
+    public void tradeDoesNotChangeCurrentRoundQueue() {
+        DraftModel m = threeRoundModel();
+        m.makePick("Player 1");
+        m.tradePicks("B", 3, "C", 2);
+        assertEquals(b, m.getTeamOnClock());
+        m.makePick("Player 2");
+        assertEquals(c, m.getTeamOnClock());
+    }
+
+    @Test
+    public void tradeCurrentOrPastRoundRejected() {
+        DraftModel m = threeRoundModel();
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("A", 1, "B", 2));
+        m.makePick("Player 1");
+        m.makePick("Player 2");
+        m.makePick("Player 3");
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("A", 1, "B", 3));
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("A", 2, "B", 3));
+        assertEquals(Arrays.asList(c, b, a), m.getRoundOrder(2));
+        assertEquals(Arrays.asList(a, b, c), m.getRoundOrder(3));
+    }
+
+    @Test
+    public void tradeRoundOutOfRangeRejected() {
+        DraftModel m = threeRoundModel();
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("A", 0, "B", 2));
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("A", 2, "B", 4));
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("A", -5, "B", 2));
+    }
+
+    @Test
+    public void tradeBadTeamNamesRejected() {
+        DraftModel m = threeRoundModel();
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("Nobody", 2, "B", 3));
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks(null, 2, "B", 3));
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("A", 2, "  ", 3));
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("A", 2, "a", 3));
+        assertEquals(Arrays.asList(c, b, a), m.getRoundOrder(2));
+    }
+
+    @Test
+    public void tradePickTeamNoLongerOwnsRejected() {
+        DraftModel m = threeRoundModel();
+        m.tradePicks("A", 2, "C", 3);
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("A", 2, "B", 3));
+        assertEquals(Arrays.asList(c, b, c), m.getRoundOrder(2));
+        assertEquals(Arrays.asList(a, b, a), m.getRoundOrder(3));
+    }
+
+    @Test
+    public void tradeLastRoundOrAfterDraftRejected() {
+        draftEverything(model);
+        assertThrows(IllegalStateException.class,
+            () -> model.tradePicks("A", 2, "B", 2));
+        DraftModel m = threeRoundModel();
+        for (int i = 1; i <= 6; i++) {
+            m.makePick("Player " + i);
+        }
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("A", 3, "B", 3));
+    }
+
+    @Test
+    public void getRoundOrderBadRoundAndReadOnly() {
+        DraftModel m = threeRoundModel();
+        assertThrows(IllegalArgumentException.class, () -> m.getRoundOrder(0));
+        assertThrows(IllegalArgumentException.class, () -> m.getRoundOrder(4));
+        assertThrows(UnsupportedOperationException.class,
+            () -> m.getRoundOrder(2).clear());
     }
 }

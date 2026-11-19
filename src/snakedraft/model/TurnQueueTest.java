@@ -78,4 +78,35 @@ public class TurnQueueTest {
         assertEquals("B", queue.peek());
         assertEquals(1, queue.size());
     }
+
+    @Test
+    public void orderHoldsAfterInterleavedEnqueuesAndDequeues() {
+        queue.enqueue("A");
+        queue.enqueue("B");
+        assertEquals("A", queue.dequeue());
+        queue.enqueue("C");
+        assertEquals("B", queue.dequeue());
+        queue.enqueue("D");
+        queue.enqueue("E");
+        assertEquals("C", queue.peek());
+        assertEquals("C", queue.dequeue());
+        assertEquals("D", queue.dequeue());
+        queue.enqueue("F");
+        assertEquals("E", queue.dequeue());
+        assertEquals("F", queue.dequeue());
+        assertTrue(queue.isEmpty());
+        assertThrows(NoSuchElementException.class, () -> queue.dequeue());
+    }
+
+    @Test
+    public void sizeTracksInterleavedOperations() {
+        queue.enqueue("A");
+        queue.enqueue("B");
+        queue.dequeue();
+        queue.enqueue("C");
+        assertEquals(2, queue.size());
+        queue.dequeue();
+        queue.dequeue();
+        assertEquals(0, queue.size());
+    }
 }

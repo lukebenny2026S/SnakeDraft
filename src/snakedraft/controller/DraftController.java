@@ -71,7 +71,10 @@ public class DraftController {
             if (name.isEmpty()) {
                 view.showError("Team name cannot be blank.");
             }
-            else if (!used.add(name.toLowerCase())) {
+            else if (DraftModel.normalize(name).isEmpty()) {
+                view.showError("Team name needs at least one letter or digit.");
+            }
+            else if (!used.add(DraftModel.normalize(name))) {
                 view.showError("A team is already named \"" + name + "\".");
             }
             else {
@@ -90,8 +93,10 @@ public class DraftController {
             view.showBoard(model.getTeamOnClock(), model.getCurrentRound(),
                 model.getTotalRounds(), model.getPickNumber(),
                 model.getAvailablePlayers());
+            view.showMessage("Type a player name, or trade picks with: "
+                + "trade <team> <round> <team> <round>");
             String raw = view.readLine(model.getTeamOnClock().getName()
-                + ", type a player name: ");
+                + ", your move: ");
             if (raw == null) {
                 view.showMessage("\nInput ended. Draft stopped early.");
                 view.showFinalRosters(model.getTeams());
@@ -103,11 +108,13 @@ public class DraftController {
     }
 
     /**
-     * Trims and format-checks the input, calls makePick, and shows the
-     * result or the error.
+     * Trims and format-checks the input. A line starting with the word
+     * "trade" goes to handleTrade; anything else is a pick for makePick.
+     * Shows the result or the error.
      *
      * @param rawInput exactly what the user typed
-     * @return true if the pick was accepted; false leaves the turn unchanged
+     * @return true if a pick was accepted; false leaves the turn unchanged
+     *         (including after a trade, which never uses up the turn)
      */
     public boolean handlePick(String rawInput) {
         if (rawInput == null || rawInput.trim().isEmpty()) {
@@ -115,6 +122,11 @@ public class DraftController {
             return false;
         }
         String input = rawInput.trim();
+        String[] words = input.split("\\s+");
+        if (words[0].equalsIgnoreCase("trade")) {
+            handleTrade(words);
+            return false;
+        }
         if (input.matches("[-+]?\\d+(\\.\\d+)?")) {
             view.showError("Type the player's name, not a number.");
             return false;
@@ -129,6 +141,96 @@ public class DraftController {
             view.showError(e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Parses "trade <team> <round> <team> <round>" and calls tradePicks.
+     * Team names may contain spaces ("trade New York 3 Bears 4"), so every
+     * way of splitting the words around a round number is tried, and the
+     * split whose two names are both real teams wins.
+     *
+     * @param words the trimmed input split on whitespace; words[0] is "trade"
+     */
+    private void handleTrade(String[] words) {
+        String usage = "Usage: trade <team> <round> <team> <round>, "
+            + "for example: trade Tigers 3 Bears 4";
+        int last = words.length - 1;
+        if (words.length < 5 || !isWholeNumber(words[last])) {
+            view.showError(usage);
+            return;
+        }
+        String teamA = null;
+        String teamB = null;
+        String roundAText = null;
+        for (int i = 2; i <= last - 2; i++) {
+            if (!isWholeNumber(words[i])) {
+                continue;
+            }
+            String a = join(words, 1, i);
+            String b = join(words, i + 1, last);
+            if (teamA == null || (isTeam(a) && isTeam(b))) {
+                teamA = a;
+                teamB = b;
+                roundAText = words[i];
+            }
+            if (isTeam(a) && isTeam(b)) {
+                break;
+            }
+        }
+        if (teamA == null) {
+            view.showError(usage);
+            return;
+        }
+        try {
+            int roundA = Integer.parseInt(roundAText);
+            int roundB = Integer.parseInt(words[last]);
+            model.tradePicks(teamA, roundA, teamB, roundB);
+            view.showTradeResult(canonicalName(teamA), roundA,
+                canonicalName(teamB), roundB);
+            view.showRoundOrder(roundA, model.getRoundOrder(roundA));
+            if (roundB != roundA) {
+                view.showRoundOrder(roundB, model.getRoundOrder(roundB));
+            }
+        }
+        catch (NumberFormatException e) {
+            view.showError("That round number is too large.");
+        }
+        catch (IllegalArgumentException | IllegalStateException e) {
+            view.showError(e.getMessage());
+        }
+    }
+
+    /** @return true if the word is an optional sign followed by digits */
+    private static boolean isWholeNumber(String word) {
+        return word.matches("[-+]?\\d+");
+    }
+
+    /** @return words[from..to) joined with single spaces */
+    private static String join(String[] words, int from, int to) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = from; i < to; i++) {
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            sb.append(words[i]);
+        }
+        return sb.toString();
+    }
+
+    /** @return true if the name matches a team in the model */
+    private boolean isTeam(String name) {
+        return canonicalName(name) != null;
+    }
+
+    /** @return the team's real name for a typed name, or null if none */
+    private String canonicalName(String name) {
+        String key = DraftModel.normalize(name);
+        for (Team team : model.getTeams()) {
+            if (DraftModel.normalize(team.getName()).equals(key)) {
+                return team.getName();
+            }
+        }
+        return null;
     }
 
     /**

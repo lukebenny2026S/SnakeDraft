@@ -287,4 +287,20 @@ public class DraftViewTest {
             + "================ FINAL ROSTERS ================" + NL,
             output());
     }
+
+    // ---------- trade display (Deliverable 4) ----------
+
+    @Test
+    public void showTradeResult_namesBothTeamsAndRounds() {
+        viewWithNoInput().showTradeResult("Hawks", 2, "Owls", 3);
+        assertEquals("  > Trade: Hawks gives its round 2 pick to Owls for "
+            + "Owls's round 3 pick." + NL, output());
+    }
+
+    @Test
+    public void showRoundOrder_listsTeamsInOrder() {
+        viewWithNoInput().showRoundOrder(4,
+            Arrays.asList(team("Owls"), team("Hawks")));
+        assertEquals("    Round 4 order: Owls, Hawks" + NL, output());
+    }
 }

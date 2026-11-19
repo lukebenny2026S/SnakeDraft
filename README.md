@@ -1,150 +1,154 @@
 # SnakeDraft
 
-A text-based fantasy football snake draft for 2 to 12 teams, built in model / view / controller style. The turn order is managed by our own linked queue, `TurnQueue<T>`.
+A text-based fantasy football snake draft for 2 to 12 teams, built in model / view / controller style. Turn order is managed by our own linked queue, `TurnQueue<T>`. Teams can trade future picks during the draft.
 
 ## Project layout
 
+Each test file sits in the same package as the class it tests.
+
 ```
-src/snakedraft/Main.java                     creates view, model, controller; starts the draft
-src/snakedraft/model/Player.java             immutable player (name, position)
-src/snakedraft/model/Team.java               team name + roster
-src/snakedraft/model/TurnQueue.java          our own singly linked FIFO queue
-src/snakedraft/model/DraftModel.java         all draft state and rules (the snake)
-src/snakedraft/model/PlayerPool.java         fixed pool of 40 players for the MVP
-src/snakedraft/model/ModelDriver.java        tiny driver: runs a whole draft with no view
-src/snakedraft/view/DraftView.java           prints the board and reads raw text
-src/snakedraft/controller/DraftController.java   setup prompts, draft loop, input checks
-test/...                                     JUnit 4 tests
+src/snakedraft/Main.java                          creates view, model, controller; starts the draft
+src/snakedraft/model/Player.java                  immutable player (name, position)
+src/snakedraft/model/Team.java                    team name + roster
+src/snakedraft/model/TurnQueue.java               our own singly linked FIFO queue
+src/snakedraft/model/DraftModel.java              all draft state and rules (snake order, picks, trades)
+src/snakedraft/model/PlayerPool.java              fixed pool of 40 players
+src/snakedraft/model/ModelDriver.java             tiny driver: runs a whole draft with no view
+src/snakedraft/view/DraftView.java                prints the board and reads raw text
+src/snakedraft/controller/DraftController.java    setup prompts, draft loop, pick and trade commands
+
+src/snakedraft/model/TurnQueueTest.java           queue contract, including interleaved enqueue/dequeue
+src/snakedraft/model/PlayerTeamTest.java          Player and Team
+src/snakedraft/model/DraftModelTest.java          picks, snake order, trades, every bad-input case
+src/snakedraft/controller/DraftControllerTest.java   setup, pick and trade commands with scripted input
+src/snakedraft/view/DraftViewTest.java            exact view output
 ```
 
-## How to run
+## How to compile and run
 
-All commands below are for Eclipse. The project uses JUnit 4 (already on the build path in `.classpath`).
+The project is an Eclipse Java project with JUnit 4 on the build path (`.classpath`). Eclipse compiles automatically on save.
 
-**Model only (no view):** right-click `src/snakedraft/model/ModelDriver.java` > Run As > Java Application. It runs a 3-team, 3-round draft with no view and no input, prints every pick (the order is A B C, C B A, A B C), shows that a pick after the draft ends is rejected, and prints the rosters.
-
-**Model tests:** right-click the `test` folder > Run As > JUnit Test. `TurnQueueTest`, `PlayerTeamTest`, and `DraftModelTest` exercise the model with no view at all. `DraftControllerTest` drives the controller with scripted input.
-
-**Thin view (full app):** right-click `src/snakedraft/Main.java` > Run As > Java Application, then type in the Console:
+**Full program:** right-click `src/snakedraft/Main.java` > Run As > Java Application, then type in the Console:
 
 1. Number of teams, number of rounds, then a name for each team.
-2. On each turn, type a player's name exactly as listed (case and spacing do not matter, so `patrick mahomes` and `PatrickMahomes` both work).
-3. When every round is done, the final rosters print.
+2. On each turn, type a player's name as listed. Case, spaces and punctuation are ignored, so `cj stroud` and `PatrickMahomes` work.
+3. To trade, type `trade <team> <round> <team> <round>` on any turn, for example `trade New York 2 Tigers 3`. The first team gives its pick in the first round, and the second team gives its pick in the second round. Only picks in rounds after the current one can be traded. A trade does not use up the turn, and the new orders for the affected rounds are printed.
+4. When every round is done, the final rosters print. To stop early, send end of input (Ctrl+D on Mac, Ctrl+Z then Enter on Windows).
 
-To stop early, send end of input (Ctrl+D on Mac/Linux, Ctrl+Z then Enter on Windows). The program prints the rosters so far and exits cleanly.
+**Tests:** right-click the `src` folder > Run As > JUnit Test. All 80 tests should pass. `TurnQueueTest`, `PlayerTeamTest` and `DraftModelTest` test the model with no view. `DraftControllerTest` and `DraftViewTest` feed scripted input and capture output, so no keyboard is needed.
+
+**Model with no view:** right-click `src/snakedraft/model/ModelDriver.java` > Run As > Java Application.
+
+**Command line (optional):** with `junit-4.13.2.jar` and `hamcrest-core-1.3.jar` in the project folder:
+
+```
+javac -cp junit-4.13.2.jar -d bin $(find src -name "*.java")
+java -cp bin snakedraft.Main
+java -cp bin:junit-4.13.2.jar:hamcrest-core-1.3.jar org.junit.runner.JUnitCore snakedraft.model.TurnQueueTest snakedraft.model.PlayerTeamTest snakedraft.model.DraftModelTest snakedraft.controller.DraftControllerTest snakedraft.view.DraftViewTest
+```
 
 ## Reflection
 
-### What changed from our specification
+### How did our design absorb the change?
 
-| Area | Spec said | What we built | Why |
-|---|---|---|---|
-| `TurnQueue` storage | Data & State listed a `Deque<T>` field as the storage | Our own singly linked chain of private `Node<T>` objects with `head`, `tail`, `size` | The project requires us to write the queue ourselves. The refill design only ever adds at the back and removes at the front, so a singly linked chain with a tail pointer is enough and every operation is O(1). |
-| Setup | The spec never said which class reads team count, rounds, and names | Added `static DraftModel setUp(DraftView, List<Player>)` to `DraftController` | Setup is input handling, so it belongs in the controller. `Main` still has no logic. We found this gap while writing `Main`. |
-| `DraftView.readLine()` | `String readLine()` | `String readLine(String prompt)`, returns `null` at end of input | Every read needs a prompt, and returning `null` lets the controller exit cleanly on Ctrl+D instead of catching a Scanner exception. |
-| `DraftView.showBoard` | `showBoard(Team, int round, int pick, List<Player>)` | Added `int totalRounds` | The board reads "Round 2 of 5", which is clearer for users. The view still gets plain values only. |
-| `DraftView.showMessage` | Not in spec | Added | Needed for setup prompts and the "input ended" message. |
-| `DraftModel.getTotalRounds()` | Not in spec | Added (read-only getter) | The controller needs it to pass to `showBoard`. |
-| New classes | Not in spec | `PlayerPool` (fixed MVP data) and `ModelDriver` (view-free driver) | `PlayerPool` keeps the data out of `Main`. `ModelDriver` proves the model runs alone. |
-| Name matching | "case and extra spaces ignored" | Normalizing lowercases and removes all whitespace | This also handles the "missing space" bad input from our scope (`PatrickMahomes`). |
-| Pool size | Revised scope said the constructor rejects a pool smaller than teams x rounds | Built as planned | The draft can always finish every round. |
-| `getPickNumber()` | "Overall pick number" | Returns the number of the next pick | Clear while the draft runs. After the draft ends it is total picks + 1. |
-| Number input | Format check for "wrong type" | `handlePick` rejects pure numbers like `42` or `4.5` with a specific message; setup rejects `five`, `4.5`, and values too large for an `int` | Covers the numeric bad-input cases from our scope. Huge values are capped by range (2 to 12 teams, rounds limited by pool size). |
-| Tests | One test list per class | Player and Team tests share `PlayerTeamTest`; added a dedicated snake-order test (A B C C B A), already-drafted, draft-over, duplicate-name, read-only list, pool-too-small, and end-of-input tests | These were the gaps we found reviewing our own test plan. |
+Our change feature is trading picks between teams, as named in our Deliverable 3 Next Steps.
 
-### Did the model really stand alone?
+| Class | D3 prediction | What actually happened |
+|---|---|---|
+| `DraftModel` | Change: `roundOrders`, `refillQueue()` reads it, `tradePicks`, `findTeam`, `getRoundOrder` | Changed exactly as predicted, plus one private helper, `checkFutureRound(int)` |
+| `DraftController` | Change: `handlePick` parses `trade` | Changed. `handlePick` hands trade lines to a new private `handleTrade`, with helpers `isWholeNumber`, `join`, `isTeam` and `canonicalName` |
+| `DraftView` | Change: `showTradeResult`, `showRoundOrder` | Changed exactly as predicted, with the predicted signatures |
+| `TurnQueue` | No change | No change |
+| `Team`, `Player`, `PlayerPool` | No change | No change |
+| `Main`, `ModelDriver` | No change | No change |
 
-Yes. Nothing in `snakedraft.model` imports anything from `view` or `controller`, and the model never prints or reads. `ModelDriver` and the three model test classes run a full draft without creating a view. The one thing we had to place on the controller side of the line was setup: reading the team count, rounds, and names is input, so it went into `DraftController.setUp`, which then builds the model through its normal constructor.
+**What matched:** every class we said would change did, and every class we said would stay the same did. `TurnQueue` needed no edits because it never decided the order; it only serves whatever order it is filled with. Moving the order into `roundOrders` was the only structural change. Before, `refillQueue()` computed forward or reverse order on the fly. Now it reads the planned order for the round, and the snake is built once in the constructor.
 
-### What happened to our unknowns
+**What surprised us:**
+- **Parsing was the hardest part, not the model.** Team names can contain spaces (`New York`), so `trade New York 2 Tigers 3` cannot be split on a fixed position. The controller tries every way of splitting the words around a round number and keeps the split where both names are real teams. That meant the controller had to read `model.getTeams()` while parsing, which we had not predicted.
+- **Trades can leave a team with two picks in one round** (and none in another). We had to decide what `tradePicks` does when that team trades again from that round: it trades its first pick in that round. A team with no pick in a round gets a clear error.
+- **Trades should not use up the turn.** We had planned to parse trades inside `handlePick`, but its return value means "a pick was accepted." A trade now returns false so the same team stays on the clock and still makes its pick.
 
-- **Snake reversal with a deque (figured out).** We rebuild the queue at the end of each round: odd rounds enqueue teams 1 to N, even rounds N to 1. This needed only basic queue operations, and `snakeOrderIsABCCBA` tests it directly.
-- **Loading real NFL player data (still open).** The MVP uses a fixed pool of 40 real player names in `PlayerPool`. Reading from a file and handling malformed rows is not built yet.
-- **Trade confirmation and pending trades (decided, not built).** Trading is our Deliverable 4 change feature. We decided trades are immediate (same keyboard, so no pending state); see Next Steps.
+### Did the change cross the model/view line?
+
+No. All trade rules (who owns which pick, which rounds can be traded, swapping slots) live in `DraftModel`. The view learned two new display methods. They receive only plain values (team name strings, round numbers and a read-only `List<Team>`), so the view still has no reference to the model and keeps no copy of model state. The controller is the only place the change rippled outside the model, which is expected because it is the layer that turns typed text into model calls. Nothing in the model knows the view exists, and `ModelDriver` still runs without it.
+
+### What changed from our D3 plan
+
+- **Bug fix from the D3 grading session:** `DraftModel.normalize` now removes everything except letters and digits and is public. The controller uses it for team names at setup. This fixed a crash where `New York` and `NewYork` passed setup but made the model constructor throw.
+- **Planned before trading, done:** view tests (Jack's `DraftViewTest`) and the bad-input pass.
+- **Planned but not done:** grouping the available players by position on the board. Trading took priority.
+- **Signatures:** `tradePicks(String, int, String, int)`, `getRoundOrder(int)`, `showTradeResult(String, int, String, int)` and `showRoundOrder(int, List<Team>)` match the plan. The new private helpers are listed above.
+- **Validation:** `tradePicks` rejects an unknown or blank team name, a team trading with itself, a round that is not in the future, a round past the end, a pick the team no longer owns, and any trade after the draft is over. Every rejection leaves the round orders unchanged. The controller rejects a missing part, a non-numeric round and a round number too large for an `int`.
+- **Tests:** we added trade tests in the model, controller and view, plus two queue tests for interleaved enqueues and dequeues. Jack moved each test file into the same package as its class, so the `test` folder is gone. We removed an empty, fully commented-out `PlayerTest.java`, because `PlayerTeamTest` already covers `Player`. We also stopped tracking `bin/` and `.DS_Store` files in git.
 
 ### What doesn't work yet
 
-- No position limits or roster balance rules, so a team can draft all QBs.
-- No real data file; the pool is fixed.
-- The full available-player list prints every turn, which gets long.
-- No suggestions for misspelled names (the user just sees "No player named ...").
-- No tests yet for `DraftView` output formatting beyond what `DraftControllerTest` checks.
+- The board still prints all available players in one long list instead of grouping them by position.
+- Picks in the current round cannot be traded. This was a design choice, so the queue never changes mid-round.
+- When a team owns two picks in the same round, it can only trade the first one.
+- If two different ways of splitting a trade command both name real teams (only possible with unusual names, like teams named `Team` and `Team 2`), the first split wins.
+- Undo, real player data from a file, and position limits are not built.
+- All 80 tests pass. There are no known failing tests.
+
+### What design change would make the next feature cheaper
+
+Our likely next feature is undo the last pick. It would be much cheaper if `DraftModel` kept a pick log (`List<PickRecord>` holding team, player and round) instead of only the queue and counters. With `roundOrders` and a log, the queue for any moment can be rebuilt from the round's planned order minus the picks already made in that round. Undo then becomes "remove the last log entry, put the player back in the pool, rebuild the queue," with no special case for undoing across a round boundary. The same log would also make it easy to show a full pick history on the board.
 
 ## Next Steps
 
-### What is left to finish the MVP (in order)
+### What is left for the final build (in order)
 
-1. Shorten the board: show available players grouped by position instead of one long list. Owner: Jack.
-2. Add view tests that check `showBoard`, `showError`, and `showFinalRosters` output. Owner: Shreyas.
-3. Final pass on bad input from the scope doc using the full app, and fix anything found. Owner: Ishaan.
-
-### Change feature: Trade picks between teams
-
-On their turn, a user can type `trade <Team A> <round> <Team B> <round>` (for example `trade Tigers 3 Bears 4`) to swap those two future picks. Trades are immediate: both teams are at the same keyboard, so the user who types the command confirms it. This settles our third unknown, so there is no pending-trade state to store. Only picks in rounds after the current round can be traded, so the queue for the round in progress never changes mid-round.
-
-**Predicted to change:**
-
-- `DraftModel`:
-  - New field `List<List<Team>> roundOrders`, built in the constructor with one snake-ordered list per round.
-  - `refillQueue()` changes to enqueue from `roundOrders.get(currentRound - 1)` instead of computing forward or reverse order.
-  - New `void tradePicks(String teamA, int roundA, String teamB, int roundB)` swaps the two slots in `roundOrders`. It throws `IllegalArgumentException` if:
-    - either team name is unknown
-    - a team doesn't own a pick in that round
-    - both picks belong to the same team
-    - a round is not after the current round
-  - It throws `IllegalStateException` if the draft is over.
-  - New private helper `Team findTeam(String name)`.
-  - New read-only `List<Team> getRoundOrder(int round)` so the controller can show upcoming order.
-- `DraftController.handlePick`: checks whether input starts with `trade`, parses the four parts (rejecting a missing part or a non-numeric round), and calls `model.tradePicks`.
-- `DraftView`: new `showTradeResult(String teamA, int roundA, String teamB, int roundB)` and `showRoundOrder(int round, List<Team> order)`.
-
-**Predicted not to change:** `TurnQueue` (it still just serves whatever order it is filled with), `Team`, `Player`, `PlayerPool`, `Main`, and `ModelDriver`.
+1. Group available players by position on the board. (Jack)
+2. Add an `order` command that prints the planned order of every remaining round, so users can see the effect of trades before picking. (Ishaan)
+3. Add a pick log to `DraftModel`, then use it for undo the last pick. (Luke)
+4. Tests for the pick log and undo, normal and bad-input cases, then a final run of every scope bad-input case. (Shreyas)
+5. Rehearse the 3-minute demo below, timed. (Everyone)
 
 ### Stretch goals
 
-- **Committing to:** trading picks (our change feature), then undo the last pick if time allows.
+- **Committing to:** undo the last pick (built on the pick log).
 - **Dropping:** auto-draft from a wish list, position limits, ordering by previous-season performance, and loading real data from a file.
 
-### New tests needed
+### 3-minute demo
 
-- `tradePicks` normal case: after `trade A 2 B 2` in a 2-team, 3-round draft, round 2 is served B then A, and round 3 is unchanged.
-- Trading a pick in the current or a past round throws `IllegalArgumentException` and changes no order.
-- Unknown team, same team on both sides, and a round outside 1 to totalRounds each throw `IllegalArgumentException`.
-- `tradePicks` after the draft is over throws `IllegalStateException`.
-- `handlePick` parsing: `trade Tigers 3 Bears 4` is accepted. `trade Tigers three Bears 4`, `trade Tigers 3`, and `TRADE  tigers 3 bears 4` (case and spacing) are each rejected or accepted correctly.
-- The full snake order for a whole draft still matches A B C C B A when no trades happen (regression).
+| Time | What we show |
+|---|---|
+| 0:00 to 0:30 | Run `Main`. Setup: type `five` for teams (rejected), then `3` teams and `3` rounds. Name teams `New York`, then `NewYork` (rejected as a duplicate), then `Bears` and `Tigers`. |
+| 0:30 to 1:10 | Round 1: try `Mahomes` (unknown player), `42` (a number), and blank input, then draft `patrick mahomes`. Bears try `Patrick Mahomes` (already drafted), then draft `josh allen`. |
+| 1:10 to 1:50 | With Tigers on the clock, trade: `trade New York 2 Tigers 3`. The printed orders show round 2 as Tigers, Bears, Tigers and round 3 as New York, Bears, New York. Then `trade Bears 1 Tigers 2` is rejected (round 1 is current) and `trade Bears 2 Bears 3` is rejected (same team). Tigers are still on the clock and draft `cj stroud`. |
+| 1:50 to 2:30 | Finish rounds 2 and 3 quickly. The board's "On the clock" shows the traded order, and the final rosters print. |
+| 2:30 to 3:00 | Run JUnit on `src` (green bar, 80 tests). Point to `tradePicks` in `DraftModel` and note that `TurnQueue` did not change. |
 
 ### Who does what
 
 | Item | Owner |
 |---|---|
 | Board grouped by position | Jack |
-| View tests | Shreyas |
-| Bad-input pass | Ishaan |
-| Trade: `DraftModel` changes (`roundOrders`, `tradePicks`) | Luke |
-| Trade: controller parsing | Ishaan |
-| Trade: view methods | Jack |
-| Trade tests | Shreyas |
-| Undo (if time) | Luke |
+| `order` command | Ishaan |
+| Pick log and undo | Luke |
+| Undo tests and final bad-input run | Shreyas |
+| Demo rehearsal | Everyone |
 
 ## Attribution
 
 | Class / test file | Who | How |
 |---|---|---|
-| `Player.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran, and tested it |
-| `Team.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran, and tested it |
-| `TurnQueue.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran, and tested it |
-| `DraftModel.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran, and tested it |
-| `PlayerPool.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran, and tested it |
-| `ModelDriver.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran, and tested it |
-| `DraftView.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran, and tested it |
-| `DraftController.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran, and tested it |
 | `Main.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed and ran it |
-| `TurnQueueTest.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran, and tested it |
-| `PlayerTeamTest.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran, and tested it |
-| `DraftModelTest.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran, and tested it |
-| `DraftControllerTest.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran, and tested it |
+| `Player.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran and tested it |
+| `Team.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran and tested it |
+| `TurnQueue.java` | Ishaan | Generated a first version with GenAI (Claude) from our spec, then reviewed, ran and tested it |
+| `DraftModel.java` | Ishaan | Generated with GenAI (Claude) from our spec (D3), then the trade feature from our D3 Next Steps (D4); reviewed, ran and tested |
+| `PlayerPool.java` | Ishaan | Generated a first version with GenAI (Claude), then reviewed it |
+| `ModelDriver.java` | Ishaan | Generated a first version with GenAI (Claude), then reviewed and ran it |
+| `DraftView.java` | Ishaan | Generated with GenAI (Claude) (D3), then the trade display methods (D4); reviewed and tested |
+| `DraftController.java` | Ishaan | Generated with GenAI (Claude) (D3), then trade command parsing (D4); reviewed, ran and tested |
+| `TurnQueueTest.java` | Ishaan | Generated with GenAI (Claude), including the D4 interleaved enqueue/dequeue tests; reviewed and ran |
+| `PlayerTeamTest.java` | Ishaan | Generated with GenAI (Claude), reviewed and ran |
+| `DraftModelTest.java` | Ishaan | Generated with GenAI (Claude), including the D4 trade tests; reviewed and ran |
+| `DraftControllerTest.java` | Ishaan | Generated with GenAI (Claude), including the D4 trade command tests; reviewed and ran |
+| `DraftViewTest.java` | Jack (Ishaan added two D4 tests) | Jack wrote the view tests and moved every test file into its class's package. Ishaan added the `showTradeResult` and `showRoundOrder` tests with GenAI (Claude). |
 
 ### GenAI note
 
-We used Claude to generate a first version of the code from our Deliverable 2 specification and scope documents, and to draft this README. We gave it our spec (class design, method signatures, validation rules, and test plan) and asked it to follow the signatures closely and point out where it had to deviate. Every deviation is listed in the Reflection table above. We then ran the program, ran all JUnit tests, and reviewed each class. For the change feature, we described our classes to GenAI and asked which ones a trade feature would force us to edit; its list (`DraftModel`, `DraftController`, `DraftView`) matched ours and did not require changing `TurnQueue`.
+We used Claude to generate a first version of the code from our Deliverable 2 specification (D3), and to implement the trade feature from our Deliverable 3 Next Steps (D4). For D4, we gave it our existing classes and the D3 prediction (`DraftModel`, `DraftController` and `DraftView` change; `TurnQueue`, `Team`, `Player`, `PlayerPool`, `Main` and `ModelDriver` do not). We asked it to stay inside that prediction and to tell us if anything outside it had to change. Nothing did. We also asked it for candidate queue tests (dequeue on empty, peek on empty, order after interleaved enqueues). We kept only the tests that check the queue's contract rather than a detail of the current view. Claude also drafted this README. We ran the program and all 80 JUnit tests, and reviewed each change before committing.
