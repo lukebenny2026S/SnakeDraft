@@ -438,4 +438,74 @@ public class DraftModelTest {
         assertThrows(IllegalArgumentException.class,
             () -> model.getTradeableRounds(""));
     }
+
+    // ---------- additional edge cases & unit tests ----------
+
+    @Test
+    public void testTeamEqualsAndHashCode() {
+        Team t1 = new Team("Alpha");
+        Team t2 = new Team("Alpha");
+        Team t3 = new Team("Beta");
+        assertEquals(t1, t2);
+        assertEquals(t1.hashCode(), t2.hashCode());
+        assertFalse(t1.equals(t3));
+        assertFalse(t1.equals(null));
+        assertFalse(t1.equals("Alpha"));
+        assertEquals("Alpha", t1.getName());
+    }
+
+    @Test
+    public void testPlayerEqualsAndHashCode() {
+        Player p1 = new Player("Tom Brady", "QB");
+        Player p2 = new Player("Tom Brady", "QB");
+        Player p3 = new Player("Patrick Mahomes", "QB");
+        assertEquals(p1, p2);
+        assertEquals(p1.hashCode(), p2.hashCode());
+        assertFalse(p1.equals(p3));
+        assertFalse(p1.equals(null));
+        assertFalse(p1.equals("Tom Brady"));
+        assertEquals("Tom Brady", p1.getName());
+        assertEquals("QB", p1.getPosition());
+    }
+
+    @Test
+    public void selfTradeRejected() {
+        DraftModel m = threeRoundModel();
+        // A team cannot trade a pick with itself
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("A", 2, "A", 3));
+        assertThrows(IllegalArgumentException.class,
+            () -> m.tradePicks("A", 2, "  a  ", 2));
+    }
+
+    @Test
+    public void positionCountForInvalidOrMissingInputs() {
+        DraftModel m = limitedModel();
+        // Requesting count for positions not drafted or empty
+        assertEquals(0, m.getPositionCount(a, "KICKER"));
+        assertEquals(0, m.getPositionCount(a, ""));
+
+        // Null checks for team or position string
+        assertThrows(IllegalArgumentException.class,
+            () -> m.getPositionCount(null, "QB"));
+        assertThrows(IllegalArgumentException.class,
+            () -> m.getPositionCount(a, null));
+        assertThrows(IllegalArgumentException.class,
+            () -> m.getPositionCount(null, null));
+    }
+
+    @Test
+    public void teamRosterIsReadOnly() {
+        model.makePick("Player 1");
+        // Attempting to modify the roster directly from outside should throw an exception
+        assertThrows(UnsupportedOperationException.class,
+            () -> a.getRoster().clear());
+    }
+
+    @Test
+    public void availablePlayersListIsUnmodifiable() {
+        List<Player> available = model.getAvailablePlayers();
+        assertThrows(UnsupportedOperationException.class,
+            () -> available.remove(0));
+    }
 }
