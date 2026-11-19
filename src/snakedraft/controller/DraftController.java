@@ -81,7 +81,8 @@ public class DraftController {
                 teams.add(new Team(name));
             }
         }
-        return new DraftModel(teams, players, rounds);
+        return new DraftModel(teams, players, rounds,
+            DraftModel.defaultPositionLimits());
     }
 
     /**
@@ -89,12 +90,15 @@ public class DraftController {
      * it. Then shows the final rosters. Exits cleanly if input ends.
      */
     public void run() {
+        showHelp();
         while (!model.isDraftOver()) {
             view.showBoard(model.getTeamOnClock(), model.getCurrentRound(),
                 model.getTotalRounds(), model.getPickNumber(),
                 model.getAvailablePlayers());
-            view.showMessage("Type a player name, or trade picks with: "
-                + "trade <team> <round> <team> <round>");
+            view.showTeamStatus(model.getTeamOnClock(),
+                model.getPositionLimits());
+            view.showMessage("Type a player's name to draft, or a command: "
+                + "trade, order, help");
             String raw = view.readLine(model.getTeamOnClock().getName()
                 + ", your move: ");
             if (raw == null) {
@@ -124,7 +128,20 @@ public class DraftController {
         String input = rawInput.trim();
         String[] words = input.split("\\s+");
         if (words[0].equalsIgnoreCase("trade")) {
-            handleTrade(words);
+            if (words.length == 1) {
+                guidedTrade();
+            }
+            else {
+                handleTrade(words);
+            }
+            return false;
+        }
+        if (input.equalsIgnoreCase("help")) {
+            showHelp();
+            return false;
+        }
+        if (input.equalsIgnoreCase("order")) {
+            showOrder();
             return false;
         }
         if (input.matches("[-+]?\\d+(\\.\\d+)?")) {
@@ -152,8 +169,9 @@ public class DraftController {
      * @param words the trimmed input split on whitespace; words[0] is "trade"
      */
     private void handleTrade(String[] words) {
-        String usage = "Usage: trade <team> <round> <team> <round>, "
-            + "for example: trade Tigers 3 Bears 4";
+        String usage = "Usage: trade <team giving> <its round> "
+            + "<other team> <their round>. Type just \"trade\" to be "
+            + "walked through it step by step.";
         int last = words.length - 1;
         if (words.length < 5 || !isWholeNumber(words[last])) {
             view.showError(usage);
@@ -197,7 +215,154 @@ public class DraftController {
         }
         catch (IllegalArgumentException | IllegalStateException e) {
             view.showError(e.getMessage());
+            view.showMessage("    Type \"order\" to see who owns each pick, "
+                + "or just \"trade\" for step-by-step help.");
         }
+    }
+
+    /**
+     * Walks the user through a trade one question at a time. Typing
+     * "cancel" or a blank line at any step cancels; nothing changes until
+     * the user confirms.
+     */
+    private void guidedTrade() {
+        if (model.getCurrentRound() >= model.getTotalRounds()) {
+            view.showError("This is the last round, so there are no future "
+                + "picks left to trade.");
+            return;
+        }
+        view.showMessage("Trade picks (type cancel at any step to stop).");
+        String teamA = askTeam("Which team is giving up a pick? ", null);
+        if (teamA == null) {
+            return;
+        }
+        int roundA = askRound(teamA);
+        if (roundA < 0) {
+            return;
+        }
+        String teamB = askTeam("Which team gets " + possessive(teamA) + " round "
+            + roundA + " pick? ", teamA);
+        if (teamB == null) {
+            return;
+        }
+        int roundB = askRound(teamB);
+        if (roundB < 0) {
+            return;
+        }
+        String answer = view.readLine("Confirm: " + teamA + " gives its round "
+            + roundA + " pick to " + teamB + ", and " + teamB
+            + " gives its round " + roundB + " pick to " + teamA
+            + ". Type yes to confirm: ");
+        if (answer == null || !(answer.trim().equalsIgnoreCase("yes")
+            || answer.trim().equalsIgnoreCase("y"))) {
+            view.showMessage("Trade canceled. Nothing changed.");
+            return;
+        }
+        handleTrade(("trade " + teamA + " " + roundA + " " + teamB + " "
+            + roundB).split("\\s+"));
+    }
+
+    /**
+     * Asks for a team name until a real one is typed.
+     *
+     * @param prompt  the question to show
+     * @param exclude a team name that is not allowed (or null)
+     * @return the team's real name, or null if the user canceled
+     */
+    private String askTeam(String prompt, String exclude) {
+        StringBuilder choices = new StringBuilder();
+        for (Team team : model.getTeams()) {
+            if (!team.getName().equals(exclude)) {
+                if (choices.length() > 0) {
+                    choices.append(", ");
+                }
+                choices.append(team.getName());
+            }
+        }
+        while (true) {
+            String raw = view.readLine(prompt + "(" + choices + "): ");
+            if (isCancel(raw)) {
+                view.showMessage("Trade canceled. Nothing changed.");
+                return null;
+            }
+            String name = canonicalName(raw);
+            if (name == null) {
+                view.showError("No team named \"" + raw.trim()
+                    + "\". Choose one of: " + choices + ".");
+            }
+            else if (name.equals(exclude)) {
+                view.showError("A team cannot trade with itself. Choose "
+                    + "one of: " + choices + ".");
+            }
+            else {
+                return name;
+            }
+        }
+    }
+
+    /**
+     * Asks which of the team's future picks to trade, listing the rounds
+     * where it still owns one.
+     *
+     * @param teamName the team's real name
+     * @return the chosen round, or -1 if canceled or the team has none
+     */
+    private int askRound(String teamName) {
+        List<Integer> rounds = model.getTradeableRounds(teamName);
+        if (rounds.isEmpty()) {
+            view.showError(teamName + " has no picks left in future rounds, "
+                + "so it has nothing to trade. Trade canceled.");
+            return -1;
+        }
+        String list = rounds.toString().replaceAll("[\\[\\]]", "");
+        while (true) {
+            String raw = view.readLine("Which round's pick does " + teamName
+                + " give? (" + list + "): ");
+            if (isCancel(raw)) {
+                view.showMessage("Trade canceled. Nothing changed.");
+                return -1;
+            }
+            String text = raw.trim().replaceFirst("(?i)^round\\s*", "");
+            if (isWholeNumber(text) && text.length() < 10
+                && rounds.contains(Integer.parseInt(text))) {
+                return Integer.parseInt(text);
+            }
+            view.showError(teamName + " can only trade its picks in rounds "
+                + list + ". Type one of those numbers.");
+        }
+    }
+
+    /** @return the possessive form: "Bears'" or "New York's" */
+    private static String possessive(String name) {
+        return name.endsWith("s") || name.endsWith("S") ? name + "'"
+            : name + "'s";
+    }
+
+    /** @return true for end of input, a blank line, or the word cancel */
+    private static boolean isCancel(String raw) {
+        return raw == null || raw.trim().isEmpty()
+            || raw.trim().equalsIgnoreCase("cancel");
+    }
+
+    /** Shows the how-to-play guide, with examples using real team names. */
+    private void showHelp() {
+        List<Team> teams = model.getTeams();
+        int next = model.getCurrentRound() + 1;
+        view.showHelp(teams.get(0).getName(), teams.get(1).getName(),
+            next <= model.getTotalRounds() ? next : 0,
+            model.getTotalRounds(), model.getPositionLimits());
+    }
+
+    /** Shows the planned pick order for the current and later rounds. */
+    private void showOrder() {
+        view.showMessage("Who picks when (trades included):");
+        for (int round = model.getCurrentRound();
+            round <= model.getTotalRounds(); round++) {
+            view.showRoundOrder(round, model.getRoundOrder(round));
+        }
+        view.showMessage("    (Round " + model.getCurrentRound()
+            + " is in progress; " + model.getTeamOnClock().getName()
+            + " is on the clock.)");
     }
 
     /** @return true if the word is an optional sign followed by digits */

@@ -294,7 +294,7 @@ public class DraftViewTest {
     public void showTradeResult_namesBothTeamsAndRounds() {
         viewWithNoInput().showTradeResult("Hawks", 2, "Owls", 3);
         assertEquals("  > Trade: Hawks gives its round 2 pick to Owls for "
-            + "Owls's round 3 pick." + NL, output());
+            + "Owls' round 3 pick." + NL, output());
     }
 
     @Test
@@ -302,5 +302,48 @@ public class DraftViewTest {
         viewWithNoInput().showRoundOrder(4,
             Arrays.asList(team("Owls"), team("Hawks")));
         assertEquals("    Round 4 order: Owls, Hawks" + NL, output());
+    }
+
+    // ---------- help and roster status ----------
+
+    @Test
+    public void showHelp_explainsTradeWithRealNames() {
+        java.util.Map<String, Integer> limits =
+            new java.util.LinkedHashMap<>();
+        limits.put("QB", 2);
+        limits.put("K", 1);
+        viewWithNoInput().showHelp("Hawks", "Owls", 2, 4, limits);
+        String text = output();
+        assertTrue(text.contains("Roster limits per team: QB 2, K 1."));
+        assertTrue(text.contains("Example: trade Hawks 2 Owls 3"));
+        assertTrue(text.contains("Hawks gives its round 2 pick to Owls, and "
+            + "Owls gives its round 3 pick to Hawks."));
+    }
+
+    @Test
+    public void showHelp_noTradesOrLimits() {
+        viewWithNoInput().showHelp("Hawks", "Owls", 0, 1,
+            new java.util.HashMap<String, Integer>());
+        String text = output();
+        assertTrue(text.contains("There are no roster limits."));
+        assertTrue(text.contains("picks can't be traded now"));
+    }
+
+    @Test
+    public void showTeamStatus_countsAndMarksFull() {
+        java.util.Map<String, Integer> limits =
+            new java.util.LinkedHashMap<>();
+        limits.put("QB", 1);
+        limits.put("RB", 2);
+        viewWithNoInput().showTeamStatus(team("Owls",
+            player("A", "QB"), player("B", "RB")), limits);
+        assertEquals("Owls' roster: QB 1/1 (full)  RB 1/2" + NL, output());
+    }
+
+    @Test
+    public void showTeamStatus_noLimitsShowsCount() {
+        viewWithNoInput().showTeamStatus(team("Hawks", player("A", "QB")),
+            new java.util.HashMap<String, Integer>());
+        assertEquals("Hawks has 1 player." + NL, output());
     }
 }

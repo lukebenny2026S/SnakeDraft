@@ -196,4 +196,87 @@ public class DraftControllerTest {
         assertEquals("Player 3",
             model.getTeams().get(0).getRoster().get(1).getName());
     }
+
+    // ---------- guided trade, help, order, limits ----------
+
+    @Test
+    public void guidedTradeAsksQuestionsThenTrades() {
+        DraftModel model = threeRoundModel();
+        String typed = "ghosts\nnew york\n9\n2\nNew York\ntigers\n3\nyes\n";
+        DraftController c = new DraftController(model, viewWithInput(typed));
+        assertFalse(c.handlePick("trade"));
+        assertEquals("Tigers", model.getRoundOrder(2).get(2).getName());
+        assertEquals("New York", model.getRoundOrder(3).get(2).getName());
+        assertEquals(1, model.getPickNumber());
+        String text = output.toString();
+        assertTrue(text.contains("No team named \"ghosts\""));
+        assertTrue(text.contains("can only trade its picks in rounds 2, 3"));
+        assertTrue(text.contains("cannot trade with itself"));
+        assertTrue(text.contains("Confirm: New York gives its round 2 pick"));
+        assertTrue(text.contains("Trade: New York gives"));
+    }
+
+    @Test
+    public void guidedTradeCancelsWithoutChanges() {
+        String[] scripts = { "cancel\n", "\n", "Bears\ncancel\n",
+            "Bears\n2\nTigers\n3\nno\n", "Bears\n2\n" };
+        for (String typed : scripts) {
+            DraftModel model = threeRoundModel();
+            new DraftController(model, viewWithInput(typed))
+                .handlePick("TRADE");
+            assertEquals("Tigers", model.getRoundOrder(2).get(0).getName());
+            assertEquals("Bears", model.getRoundOrder(3).get(1).getName());
+            assertEquals("New York", model.getRoundOrder(3).get(0).getName());
+        }
+        assertTrue(output.toString().contains("Trade canceled"));
+    }
+
+    @Test
+    public void guidedTradeInLastRoundExplainsWhyNot() {
+        DraftModel model = newModel(); // 2 rounds
+        DraftController c = new DraftController(model, viewWithInput(""));
+        c.handlePick("Player 1");
+        c.handlePick("Player 2");
+        c.handlePick("trade");
+        assertTrue(output.toString().contains("no future picks left"));
+    }
+
+    @Test
+    public void helpAndOrderCommandsDoNotUseTurn() {
+        DraftModel model = threeRoundModel();
+        DraftController c = new DraftController(model, viewWithInput(""));
+        assertFalse(c.handlePick("help"));
+        assertFalse(c.handlePick("ORDER"));
+        assertEquals(1, model.getPickNumber());
+        String text = output.toString();
+        assertTrue(text.contains("HOW IT WORKS"));
+        assertTrue(text.contains("Example: trade New York 2 Bears 3"));
+        assertTrue(text.contains("Round 3 order: New York, Bears, Tigers"));
+        assertTrue(text.contains("New York is on the clock"));
+    }
+
+    @Test
+    public void setUpUsesDefaultPositionLimits() {
+        List<Player> pool = new ArrayList<>(players);
+        DraftModel model = DraftController.setUp(
+            viewWithInput("2\n1\nA\nB\n"), pool);
+        assertEquals(DraftModel.defaultPositionLimits(),
+            model.getPositionLimits());
+    }
+
+    @Test
+    public void positionLimitErrorShownAndTurnKept() {
+        List<Player> pool = Arrays.asList(new Player("K One", "K"),
+            new Player("K Two", "K"), new Player("K Three", "K"),
+            new Player("WR One", "WR"));
+        DraftModel model = new DraftModel(Arrays.asList(new Team("A"),
+            new Team("B")), pool, 2, DraftModel.defaultPositionLimits());
+        DraftController c = new DraftController(model, viewWithInput(""));
+        assertTrue(c.handlePick("K One"));
+        assertTrue(c.handlePick("K Two"));
+        assertFalse(c.handlePick("K Three")); // B already has 1 K
+        assertTrue(output.toString().contains("already has 1 K,"));
+        assertEquals("B", model.getTeamOnClock().getName());
+        assertTrue(c.handlePick("WR One"));
+    }
 }

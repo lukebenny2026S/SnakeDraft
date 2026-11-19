@@ -6,7 +6,9 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -302,5 +304,138 @@ public class DraftModelTest {
         assertThrows(IllegalArgumentException.class, () -> m.getRoundOrder(4));
         assertThrows(UnsupportedOperationException.class,
             () -> m.getRoundOrder(2).clear());
+    }
+
+    // ---------- position limits ----------
+
+    /** 2 teams, 3 rounds; QB limit 1. Pool: 3 QBs, 3 RBs. */
+    private DraftModel limitedModel() {
+        List<Player> pool = Arrays.asList(new Player("QB One", "QB"),
+            new Player("QB Two", "QB"), new Player("QB Three", "QB"),
+            new Player("RB One", "RB"), new Player("RB Two", "RB"),
+            new Player("RB Three", "RB"));
+        Map<String, Integer> limits = new HashMap<>();
+        limits.put("qb", 1);
+        return new DraftModel(Arrays.asList(a, b), pool, 3, limits);
+    }
+
+    @Test
+    public void pickUnderLimitIsAccepted() {
+        DraftModel m = limitedModel();
+        m.makePick("QB One");
+        assertEquals(1, m.getPositionCount(a, "QB"));
+        assertEquals(1, m.getPositionCount(a, "qb"));
+        assertEquals(0, m.getPositionCount(a, "RB"));
+    }
+
+    @Test
+    public void pickOverLimitRejectedAndChangesNothing() {
+        DraftModel m = limitedModel();
+        m.makePick("QB One");   // A, round 1
+        m.makePick("RB One");   // B, round 1
+        m.makePick("QB Two");   // B, round 2 (B's first QB)
+        // A is on the clock and already has a QB
+        IllegalArgumentException e = assertThrows(
+            IllegalArgumentException.class, () -> m.makePick("QB Three"));
+        assertTrue(e.getMessage().contains("already has 1 QB"));
+        assertEquals(a, m.getTeamOnClock());
+        assertEquals(4, m.getPickNumber());
+        assertTrue(m.isAvailable("QB Three"));
+        m.makePick("RB Two");
+        assertEquals(2, a.getRoster().size());
+    }
+
+    @Test
+    public void limitWaivedWhenNoLegalPickLeft() {
+        List<Player> pool = Arrays.asList(new Player("QB One", "QB"),
+            new Player("QB Two", "QB"), new Player("QB Three", "QB"),
+            new Player("QB Four", "QB"));
+        Map<String, Integer> limits = new HashMap<>();
+        limits.put("QB", 1);
+        DraftModel m = new DraftModel(Arrays.asList(a, b), pool, 2, limits);
+        m.makePick("QB One");
+        m.makePick("QB Two");
+        m.makePick("QB Three"); // only QBs left, so the limit is waived
+        m.makePick("QB Four");
+        assertTrue(m.isDraftOver());
+        assertEquals(2, a.getRoster().size());
+    }
+
+    @Test
+    public void noLimitsByDefault() {
+        assertTrue(model.getPositionLimits().isEmpty());
+        for (int i = 1; i <= 6; i++) {
+            model.makePick("Player " + i); // all WR
+        }
+        assertTrue(model.isDraftOver());
+    }
+
+    @Test
+    public void defaultLimitsAreTheProgramRules() {
+        Map<String, Integer> d = DraftModel.defaultPositionLimits();
+        assertEquals(Integer.valueOf(2), d.get("QB"));
+        assertEquals(Integer.valueOf(4), d.get("RB"));
+        assertEquals(Integer.valueOf(4), d.get("WR"));
+        assertEquals(Integer.valueOf(2), d.get("TE"));
+        assertEquals(Integer.valueOf(1), d.get("K"));
+        assertEquals(Integer.valueOf(1), d.get("DEF"));
+    }
+
+    @Test
+    public void badLimitsRejected() {
+        Map<String, Integer> zero = new HashMap<>();
+        zero.put("QB", 0);
+        assertThrows(IllegalArgumentException.class,
+            () -> new DraftModel(teams, players, 2, zero));
+        Map<String, Integer> blank = new HashMap<>();
+        blank.put(" ", 2);
+        assertThrows(IllegalArgumentException.class,
+            () -> new DraftModel(teams, players, 2, blank));
+        Map<String, Integer> nullValue = new HashMap<>();
+        nullValue.put("QB", null);
+        assertThrows(IllegalArgumentException.class,
+            () -> new DraftModel(teams, players, 2, nullValue));
+        assertThrows(IllegalArgumentException.class,
+            () -> new DraftModel(teams, players, 2, null));
+    }
+
+    @Test
+    public void positionLimitsAreReadOnlyAndUppercased() {
+        DraftModel m = limitedModel();
+        assertEquals(Integer.valueOf(1), m.getPositionLimits().get("QB"));
+        assertThrows(UnsupportedOperationException.class,
+            () -> m.getPositionLimits().put("RB", 1));
+    }
+
+    // ---------- tradeable rounds ----------
+
+    @Test
+    public void tradeableRoundsListsFuturePicksOwned() {
+        DraftModel m = threeRoundModel();
+        assertEquals(Arrays.asList(2, 3), m.getTradeableRounds("a"));
+        m.tradePicks("A", 2, "C", 3);
+        assertEquals(Arrays.asList(3), m.getTradeableRounds("A"));
+        assertEquals(Arrays.asList(2), m.getTradeableRounds("C"));
+    }
+
+    @Test
+    public void tradeableRoundsEmptyInLastRoundOrAfterDraft() {
+        DraftModel m = threeRoundModel();
+        for (int i = 1; i <= 6; i++) {
+            m.makePick("Player " + i);
+        }
+        assertTrue(m.getTradeableRounds("A").isEmpty());
+        draftEverything(m);
+        assertTrue(m.getTradeableRounds("A").isEmpty());
+    }
+
+    @Test
+    public void tradeableRoundsBadTeamRejected() {
+        assertThrows(IllegalArgumentException.class,
+            () -> model.getTradeableRounds("Nobody"));
+        assertThrows(IllegalArgumentException.class,
+            () -> model.getTradeableRounds(null));
+        assertThrows(IllegalArgumentException.class,
+            () -> model.getTradeableRounds(""));
     }
 }

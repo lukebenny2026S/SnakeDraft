@@ -25,23 +25,56 @@ public class DraftModel {
     private final TurnQueue<Team> turnQueue;
     private final List<List<Team>> roundOrders;
     private final int totalRounds;
+    private final Map<String, Integer> positionLimits;
     private int currentRound;
     private int pickNumber;
     private boolean draftOver;
 
     /**
-     * Builds the pool and fills the queue with the teams in round-1 order.
+     * The roster limits the full program uses: at most 2 QB, 4 RB, 4 WR,
+     * 2 TE, 1 K and 1 DEF per team.
+     *
+     * @return a new, modifiable map of position to maximum count
+     */
+    public static Map<String, Integer> defaultPositionLimits() {
+        Map<String, Integer> limits = new LinkedHashMap<>();
+        limits.put("QB", 2);
+        limits.put("RB", 4);
+        limits.put("WR", 4);
+        limits.put("TE", 2);
+        limits.put("K", 1);
+        limits.put("DEF", 1);
+        return limits;
+    }
+
+    /**
+     * Builds a draft with no position limits.
      *
      * @param teams       the teams, in round-1 pick order
      * @param players     the draftable players
      * @param totalRounds how many rounds to draft
-     * @throws IllegalArgumentException for null arguments or elements, fewer
-     *         than 2 teams, totalRounds < 1, duplicate team or player names, or
-     *         fewer players than teams * rounds
+     * @throws IllegalArgumentException as in the four-argument constructor
      */
     public DraftModel(List<Team> teams, Collection<Player> players,
         int totalRounds) {
-        if (teams == null || players == null) {
+        this(teams, players, totalRounds, new LinkedHashMap<String, Integer>());
+    }
+
+    /**
+     * Builds the pool and fills the queue with the teams in round-1 order.
+     *
+     * @param teams          the teams, in round-1 pick order
+     * @param players        the draftable players
+     * @param totalRounds    how many rounds to draft
+     * @param positionLimits most players of each position one team may
+     *                       draft (positions not listed have no limit)
+     * @throws IllegalArgumentException for null arguments or elements, fewer
+     *         than 2 teams, totalRounds < 1, duplicate team or player names,
+     *         fewer players than teams * rounds, or a limit below 1
+     */
+    public DraftModel(List<Team> teams, Collection<Player> players,
+        int totalRounds, Map<String, Integer> positionLimits) {
+        if (teams == null || players == null || positionLimits == null) {
             throw new IllegalArgumentException("Teams and players are required.");
         }
         if (teams.size() < 2) {
@@ -93,6 +126,17 @@ public class DraftModel {
             }
             roundOrders.add(order);
         }
+        this.positionLimits = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : positionLimits.entrySet()) {
+            if (entry.getKey() == null || entry.getKey().trim().isEmpty()
+                || entry.getValue() == null || entry.getValue() < 1) {
+                throw new IllegalArgumentException(
+                    "Each position limit needs a position and a value of "
+                    + "at least 1.");
+            }
+            this.positionLimits.put(entry.getKey().trim().toUpperCase(),
+                entry.getValue());
+        }
         this.currentRound = 1;
         this.pickNumber = 1;
         this.draftOver = false;
@@ -104,8 +148,9 @@ public class DraftModel {
      *
      * @param playerName the player's name (case and spacing ignored)
      * @return the drafted player
-     * @throws IllegalArgumentException if the name is null, blank, unknown, or
-     *         already drafted (no state changes)
+     * @throws IllegalArgumentException if the name is null, blank, unknown,
+     *         already drafted, or would put the team over a position limit
+     *         while it still has a legal pick (no state changes)
      * @throws IllegalStateException if the draft is over (no state changes)
      */
     public Player makePick(String playerName) {
@@ -123,6 +168,15 @@ public class DraftModel {
         if (!pool.containsKey(key)) {
             throw new IllegalArgumentException(
                 "No player named \"" + playerName.trim() + "\" in the pool.");
+        }
+        Team onClock = turnQueue.peek();
+        Player wanted = pool.get(key);
+        if (isFull(onClock, wanted.getPosition()) && hasLegalPick(onClock)) {
+            String pos = wanted.getPosition().toUpperCase();
+            throw new IllegalArgumentException(onClock.getName()
+                + " already has " + getPositionCount(onClock, pos) + " " + pos
+                + (getPositionCount(onClock, pos) == 1 ? "" : "s")
+                + ", the most allowed. Pick a different position.");
         }
 
         // All checks passed: now change state.
@@ -242,6 +296,49 @@ public class DraftModel {
             new ArrayList<>(roundOrders.get(round - 1)));
     }
 
+    /**
+     * @return a read-only map of position to the most players of that
+     *         position one team may draft (empty if there are no limits)
+     */
+    public Map<String, Integer> getPositionLimits() {
+        return Collections.unmodifiableMap(positionLimits);
+    }
+
+    /**
+     * @param team     a team
+     * @param position a position such as "QB" (case ignored)
+     * @return how many players of that position the team has drafted
+     */
+    public int getPositionCount(Team team, String position) {
+        int count = 0;
+        for (Player p : team.getRoster()) {
+            if (p.getPosition().equalsIgnoreCase(position)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * @param teamName a team name (case and spacing ignored)
+     * @return the future rounds (after the current one) in which that team
+     *         owns at least one pick, in order; empty if none
+     * @throws IllegalArgumentException if the name is null, blank or unknown
+     */
+    public List<Integer> getTradeableRounds(String teamName) {
+        Team team = findTeam(teamName);
+        List<Integer> rounds = new ArrayList<>();
+        if (draftOver) {
+            return rounds;
+        }
+        for (int round = currentRound + 1; round <= totalRounds; round++) {
+            if (roundOrders.get(round - 1).contains(team)) {
+                rounds.add(round);
+            }
+        }
+        return rounds;
+    }
+
     /** @return a read-only list of all teams in round-1 order */
     public List<Team> getTeams() {
         return Collections.unmodifiableList(teams);
@@ -295,6 +392,25 @@ public class DraftModel {
         }
         throw new IllegalArgumentException(
             "No team named \"" + name.trim() + "\".");
+    }
+
+    /** @return true if the team has reached its limit for this position */
+    private boolean isFull(Team team, String position) {
+        Integer limit = positionLimits.get(position.toUpperCase());
+        return limit != null && getPositionCount(team, position) >= limit;
+    }
+
+    /**
+     * @return true if some player still in the pool fits under the team's
+     *         limits. If none does, limits are waived so the draft can't stall.
+     */
+    private boolean hasLegalPick(Team team) {
+        for (Player p : pool.values()) {
+            if (!isFull(team, p.getPosition())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Throws unless round is after the current round and not past the end. */

@@ -3,6 +3,7 @@ package snakedraft.view;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Scanner;
 import snakedraft.model.Player;
@@ -104,6 +105,106 @@ public class DraftView {
     }
 
     /**
+     * Prints how to use the program, with examples that use real team names.
+     *
+     * @param teamA       a team name for the examples
+     * @param teamB       another team name for the examples
+     * @param firstRound  the first round whose picks can be traded, or 0 if
+     *                    none can
+     * @param totalRounds the last round
+     * @param limits      position limits per team (may be empty)
+     */
+    public void showHelp(String teamA, String teamB, int firstRound,
+        int totalRounds, Map<String, Integer> limits) {
+        out.println();
+        out.println("------------------- HOW IT WORKS -------------------");
+        out.println("* Teams take turns picking. The order reverses every "
+            + "round (1 to N, then N to 1), so it snakes.");
+        out.println("* To draft: type the player's name on your turn. "
+            + "Capitals, spaces and punctuation don't matter.");
+        if (limits.isEmpty()) {
+            out.println("* There are no roster limits.");
+        }
+        else {
+            out.println("* Roster limits per team: " + formatLimits(limits)
+                + ". You can't go over a limit unless no other position is "
+                + "left.");
+        }
+        if (firstRound == 0) {
+            out.println("* Trading: there are no future rounds left, so "
+                + "picks can't be traded now.");
+        }
+        else {
+            int other = Math.min(firstRound + 1, totalRounds);
+            out.println("* To trade picks: type trade and answer the "
+                + "questions. Or do it in one line:");
+            out.println("      trade <team giving> <its round> <other team> "
+                + "<their round>");
+            out.println("      Example: trade " + teamA + " " + firstRound
+                + " " + teamB + " " + other);
+            out.println("      means " + teamA + " gives its round "
+                + firstRound + " pick to " + teamB + ", and " + teamB
+                + " gives its round " + other + " pick to " + teamA + ".");
+            out.println("  Only picks in future rounds can be traded, and "
+                + "trading doesn't use up your turn.");
+        }
+        out.println("* order: see who picks when in each remaining round.");
+        out.println("* help: show this guide again.");
+        out.println("----------------------------------------------------");
+    }
+
+    /**
+     * Prints how many players of each limited position a team has.
+     *
+     * @param team   the team
+     * @param limits position limits per team (may be empty)
+     */
+    public void showTeamStatus(Team team, Map<String, Integer> limits) {
+        if (limits.isEmpty()) {
+            int size = team.getRoster().size();
+            out.println(team.getName() + " has " + size
+                + (size == 1 ? " player." : " players."));
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, Integer> entry : limits.entrySet()) {
+            int count = 0;
+            for (Player p : team.getRoster()) {
+                if (p.getPosition().equalsIgnoreCase(entry.getKey())) {
+                    count++;
+                }
+            }
+            if (sb.length() > 0) {
+                sb.append("  ");
+            }
+            sb.append(entry.getKey()).append(' ').append(count).append('/')
+                .append(entry.getValue());
+            if (count >= entry.getValue()) {
+                sb.append(" (full)");
+            }
+        }
+        out.println(possessive(team.getName()) + " roster: " + sb);
+    }
+
+    /** @return the possessive form: "Bears'" or "New York's" */
+    private static String possessive(String name) {
+        return name.endsWith("s") || name.endsWith("S") ? name + "'"
+            : name + "'s";
+    }
+
+    /** @return limits formatted like "QB 2, RB 4" */
+    private static String formatLimits(Map<String, Integer> limits) {
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, Integer> entry : limits.entrySet()) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(entry.getKey()).append(' ').append(entry.getValue());
+        }
+        return sb.toString();
+    }
+
+    /**
      * Prints the result of an accepted trade.
      *
      * @param teamA  first team's name
@@ -114,7 +215,8 @@ public class DraftView {
     public void showTradeResult(String teamA, int roundA, String teamB,
         int roundB) {
         out.println("  > Trade: " + teamA + " gives its round " + roundA
-            + " pick to " + teamB + " for " + teamB + "'s round " + roundB
+            + " pick to " + teamB + " for " + possessive(teamB) + " round "
+            + roundB
             + " pick.");
     }
 
